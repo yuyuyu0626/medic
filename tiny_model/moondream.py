@@ -1,17 +1,18 @@
 import torch
 import torch.nn as nn
 import random
+import os
 
 from typing import Literal, Tuple, TypedDict, Union, Dict, Any, Optional, List
 from PIL import Image
 from dataclasses import dataclass
 from tokenizers import Tokenizer
 
-from .config import MoondreamConfig
-from .image_crops import reconstruct_from_crops
-from .vision import vision_encoder, vision_projection, prepare_crops, build_vision_model
-from .text import build_text_model, text_encoder, lm_head, text_decoder
-from .region import (
+from config import MoondreamConfig
+from image_crops import reconstruct_from_crops
+from vision import vision_encoder, vision_projection, prepare_crops, build_vision_model
+from text import build_text_model, text_encoder, lm_head, text_decoder
+from region import (
     decode_coordinate,
     encode_coordinate,
     decode_size,
@@ -19,9 +20,9 @@ from .region import (
     encode_spatial_refs,
     SpatialRefs,
 )
-from .layers import QuantizedLinear
-from .lora import variant_state_dict
-from .utils import remove_outlier_points
+from layers import QuantizedLinear
+from lora import variant_state_dict
+from utils import remove_outlier_points
 
 ImageEncodingSettings = TypedDict(
     "ImageEncodingSettings",
@@ -86,7 +87,11 @@ class MoondreamModel(nn.Module):
         super().__init__()
         self.config = config
 
-        self.tokenizer = Tokenizer.from_pretrained("moondream/starmie-v1")
+        #self.tokenizer = Tokenizer.from_pretrained("moondream/starmie-v1")
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        tokenizer_path = os.path.join(current_dir, "tokenizer.json")
+        self.tokenizer = Tokenizer.from_file(tokenizer_path)
+        #yyxdebug
         self.vision = build_vision_model(config.vision, dtype)
         self.text = build_text_model(config.text, dtype)
 
