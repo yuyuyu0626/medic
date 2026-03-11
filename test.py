@@ -51,34 +51,43 @@ class LoraModule(nn.Module):
 # 3. 单步推理逻辑 (极速版)
 def predict_with_lora(model, lora_dict, tokenizer, config, device, image, prompt):
     with torch.no_grad():
-        # 视觉编码
+        # 1. 视觉与文本编码
         img_emb = model._run_vision_encoder(image)
         if img_emb.dim() == 2: img_emb = img_emb.unsqueeze(0)
         
-        # 文本编码
         prompt_ids = tokenizer.encode(prompt, add_special_tokens=False)
         prompt_toks = torch.tensor([prompt_ids], device=device)
         prompt_emb = text_encoder(prompt_toks, model.text)
         
-        # 序列拼接
+        # 2. 序列拼接
         bos_id = torch.tensor([[config.tokenizer.bos_id]], device=device)
         bos_emb = text_encoder(bos_id, model.text)
         inputs_embeds = torch.cat([bos_emb, img_emb, prompt_emb], dim=1)
         
-        # 多模态注意力掩码
+        # 3. 掩码与前向传播
         seq_len = inputs_embeds.size(1)
         mask = torch.zeros(seq_len, seq_len, device=device, dtype=torch.bool)
         mask[:730, :730] = True 
         for j in range(730, seq_len): mask[j, : j + 1] = True
         pos_ids = torch.arange(seq_len, device=device)
         
-        # 注入 LoRA 预测下一个 Token
         hidden = text_decoder(inputs_embeds, model.text, mask, pos_ids, config.text, lora=lora_dict)
-        logits = lm_head(hidden[:, -1:, :], model.text) # 只取最后一个位置的输出
         
-        # 获取最大概率的 Token
-        predicted_id = torch.argmax(logits, dim=-1).item()
-        return tokenizer.decode([predicted_id])
+        # 此时的 logits 是 [1, 50000+] 大小的向量，包含了所有词的概率得分
+        logits = lm_head(hidden, model.text) 
+        
+        # === 核心实质性工作量：Constrained Decoding ===
+        valid_chars = ['A', 'B', 'C', 'D']
+        # 获取这四个字母在词表中的具体 Token ID
+        valid_ids = [tokenizer.encode(c, add_special_tokens=False)[0] for c in valid_chars]
+        
+        # 我们只从 logits 中抽出 A, B, C, D 这四个维度的得分
+        target_logits = logits[0, valid_ids]
+        
+        # 在这四个得分中选出最大的那个
+        best_idx = torch.argmax(target_logits).item()
+        
+        return valid_chars[best_idx]
 
 # 4. 主执行代码
 if __name__ == "__main__":
