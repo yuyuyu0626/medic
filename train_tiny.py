@@ -6,18 +6,21 @@ from PIL import Image
 from safetensors.torch import load_file
 from tqdm import tqdm  # 如果报错请 pip install tqdm
 
-# 1. 路径配置
-MODEL_PATH = "/home/zhanght2504/zhanght2504_didi2/runspace_yyxs/test/pretrain_model"
-IMAGE_DIR = "/home/zhanght2504/zhanght2504_didi2/runspace_yyxs/PMC_VQA/images_2/figures"
-CSV_PATH = "/home/zhanght2504/zhanght2504_didi2/runspace_yyxs/PMC_VQA/test_2.csv"
-OUTPUT_CSV = "./pmc_vqa_results.csv" # 结果保存路径
+# 1. 路径配置（确保无论从哪里运行脚本都能找到模型与数据）
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir))
 
-# 2. 环境准备
-sys.path.append(MODEL_PATH)
-os.chdir(MODEL_PATH)
+MODEL_PATH = os.path.join(SCRIPT_DIR, "tiny_model")  # 极轻量模型，约 1.6B 参数
+IMAGE_DIR = os.path.join(REPO_ROOT, "figures")
+CSV_PATH = os.path.join(REPO_ROOT, "PMC-VQA", "test_2.csv")
+OUTPUT_CSV = os.path.join(REPO_ROOT, "pmc_vqa_results.csv")  # 结果保存路径
 
-from moondream import MoondreamModel
-from config import MoondreamConfig
+# 2. 环境准备（让 tiny_model 成为一个可导入的 package）
+#  - 我们把 repo 根目录加入 sys.path，让 `import tiny_model` 能够工作
+sys.path.insert(0, REPO_ROOT)
+os.chdir(SCRIPT_DIR)
+
+from tiny_model import MoondreamModel, MoondreamConfig
 from transformers import AutoTokenizer
 
 # 3. 初始化模型
@@ -34,9 +37,13 @@ model.eval()
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, local_files_only=True, trust_remote_code=True)
 
 # 4. 加载数据
-df = pd.read_csv(CSV_PATH).sample(1)
+# NOTE: 这里原本使用了 `.sample(1)`，因此只会随机选择 1 条记录进行推理。
+# 如果需要对全部数据运行，请去掉 `.sample(1)`。
+df = pd.read_csv(CSV_PATH)
 # 如果你想先跑一小部分测试，可以取消下面这行的注释：
-# df = df.head(500) 
+# df = df.head(500)
+# 如果你想仅跑 1 条样例测试，可以取消下面这行的注释：
+# df = df.sample(1)
 
 # 5. 定义单条推理逻辑
 def predict_vqa(row):
@@ -53,7 +60,11 @@ def predict_vqa(row):
         prompt = f"Question: {question}\nChoices: {choices}\nOutput the correct option letter (A, B, C, or D) only."
         
         with torch.no_grad():
-            result = model.query(image=image, question=prompt)
+            result = model.query(
+                image=image,
+                question=prompt,
+                settings={"max_tokens": 64, "temperature": 0.2, "top_p": 0.9},
+            )
             # 简单清洗结果，只保留第一个字母并大写
             ans = result["answer"].strip().upper()
             return ans[0] if len(ans) > 0 else "N/A"
